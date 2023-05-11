@@ -182,7 +182,7 @@ mod1g$n <- dim(t)[1]
 
 Z <- t$treat_all
 Y <- t$prob_act_st
-block <- t$block
+block <- t$block 
 
 # Generate probabilities of treatment by block
 probs <- genprobexact(Z = Z, blockvar = block)
