@@ -1,0 +1,237 @@
+---
+title: "Introduction to Power Simulations"
+author: ""
+date: "2023-05-08"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## The problem
+
+Suppose we have a simple experiment with two treatment groups, with assignment $D_i \in {1,0}$.
+
+For the sake of simplicity, let's assume each group has `n` individuals.
+
+```{r x_data}
+ # Initialise a random number generator
+set.seed(6)
+
+# Define number of subjects and their treatment assignments
+n <- 20
+data_1 <- data.frame(D = rbinom(2*n, 1, 0.5))
+```
+
+Let's now suppose that the outcome, under the control arm ($Y_i(0)$) is distributed as the standard normal (i.e. a normal distribution with mean 0 and standard deviation 1.)
+
+We can now simulate the effect of treatment, by assuming there is some *constant* treatment effect across units, `tau`, which increases the outcome by 0.05 (we could just as easily assume it *decreases* the outcome). In the first instance, let's assume this effect is 0.05:
+
+```{r y_data}
+tau <- 0.05
+
+# Define the control distribution
+data_1$Y <- rnorm(2*n)
+
+# Impose a treatment effect on *treated* units
+data_1$Y <- ifelse(data_1$D == 1, data_1$Y + tau, data_1$Y)
+
+```
+
+We now want to know whether we can *detect* the true effect of 0.05 we simulated above. Notice that we know the effect exists, so the question is whether our empirical design is sensitive enough to detect that effect.
+
+As is typical, we'll assume we want to test the null hypothesis at the 95% significance level. To do so, we can run a basic bivariate regression and look at the p-value corresponding to the treatment effect coefficient:
+
+```{r}
+alpha = 0.05 
+mod_1 <- summary(lm(Y ~ D, data_1))
+mod_1$coefficients["D","Pr(>|t|)"] < alpha
+```
+
+In this case, we can reject the null hypothesis (if your output above returns FALSE, don't worry too much: this is likely due to differences in random number generating settings).
+
+This result might be quite surprising: with so few subjects in treatment (20), and a small treatment effect (5% of the control group's standard deviation), we may expect not to be able to detect such an effect.
+
+Let's try demonstrate this feature. We'll rerun the same code below, but just take a new "sample" from the population:
+
+``` {r}
+data_2 <- data.frame(D = rbinom(2*n, 1, 0.5))
+data_2$Y <- rnorm(2*n)
+data_2$Y <- ifelse(data_2$D == 1, data_2$Y + tau, data_2$Y)
+
+mod_2 <- summary(lm(Y ~ D, data_2))
+
+mod_2$coefficients["D","Pr(>|t|)"] < alpha
+
+```
+
+Now, just by taking a new random sample, we fail to reject the null (even though, in this simulated example, we know the null hypothesis is false!)
+
+## Power
+
+Ideally, what we need is to estimate how likely it is we would be able to detect an effect of a certain size, given our experimental design.
+
+**Power** is a quantification of the probability of correctly rejecting the null (i.e. finding a statistically significant effect, or parameter more generally) of a certain size.
+
+We can calculate the power of a specific design by simulating the data generating process many times, assuming an effect size, and checking each time to see whether the p-value for the target parameter(s) is less than the critical threshold (typically 0.05):
+
+```{r}
+# Set RNG seed for replicability
+
+set.seed(8)
+
+# Define a vector to store p-values
+p_vals <- c()
+
+# Repeatedly generate new data, run inference test, and add p-value to list:
+for (i in 1:1000) {
+  data_i <- data.frame(D = rbinom(2*n, 1, 0.5))
+  data_i$Y <- rnorm(2*n)
+  data_i$Y <- ifelse(data_i$D == 1, data_i$Y + tau, data_i$Y)
+
+  mod_i <- summary(lm(Y ~ D, data_i))
+
+  p_vals[i] <- mod_i$coefficients["D","Pr(>|t|)"]
+}
+```
+
+Now, we have a list of p-values over these simulations. Here's a look at the first 20:
+```{r}
+p_vals[1:20]
+```
+
+The power of this experimental design, for an effect size of 0.05, is just the proportion of times these p-values fall below our significance threshold (`alpha`):
+
+```{r}
+mean(p_vals < alpha)
+```
+
+These results suggest that, if your empirical experiment is similar to this simulation, we would expect to detect an effect size of 0.05 in about 4.6% of experiments. Typically, we only run one experiment and so that's quite a low probability -- we would most likely not want to spend research funds if we had less than a 1 in 20 chance of correctly rejecting the null!
+
+## Increasing the power of experiments 
+
+How might we *increase* the power of our experiment?
+
+One obvious option is to relax our significance threshold. If we set `alpha = 0.1` rather than 0.05, then we are willing to be more lenient when rejecting the null hypothesis, and thus our power should increase:
+
+```{r}
+set.seed(9)
+
+# Increase the hypothesized effect size, keep the same effect size
+alpha <- 0.1
+tau <- 0.05
+
+p_vals_alpha <- c()
+for (i in 1:1000) {
+  data_i <- data.frame(D = rbinom(2*n, 1, 0.5))
+  data_i$Y <- rnorm(2*n)
+  data_i$Y <- ifelse(data_i$D == 1, data_i$Y + tau, data_i$Y)
+
+  mod_i <- summary(lm(Y ~ D, data_i))
+
+  p_vals_alpha[i] <- mod_i$coefficients["D","Pr(>|t|)"]
+}
+
+mean(p_vals_alpha < alpha)
+```
+
+Another option is to increase the hypothesized treatment effect. If our treatment effect is 1, for example, then the difference in groups will be much larger and so it should be easier to detect this difference in a statistical model (holding everything else constant):
+
+```{r}
+set.seed(10)
+
+# Increase the hypothesized effect size, keep the same significance threshold
+alpha <- 0.05
+tau <- 1
+
+# Reset alpha
+alpha <- 0.05
+
+p_vals_0.5 <- c()
+for (i in 1:1000) {
+  data_i <- data.frame(D = rbinom(2*n, 1, 0.5))
+  data_i$Y <- rnorm(2*n)
+  data_i$Y <- ifelse(data_i$D == 1, data_i$Y + tau, data_i$Y)
+
+  mod_i <- summary(lm(Y ~ D, data_i))
+
+  p_vals_0.5[i] <- mod_i$coefficients["D","Pr(>|t|)"]
+}
+
+mean(p_vals_0.5 < alpha)
+```
+In both cases, our estimated power is higher than our original example. By increasing our effect size, our power value exceeds the typical 0.8 threshold experimentalists use to distinguish "well-powered" experiments.
+
+Relaxing our significance threshold to 0.1 is, however, not ideal: while we increase our power, we also double the risk of a Type I error (we will falsely reject a null hypothesis 1 in 10 times). In our hypothetical case this is not concerning as we know there is a true effect, but in the real world we do not know that the null hypothesis is incorrect...
+
+Increasing the hypothesized effect size, moreover, makes a large assumption about the data generating process. If the true effect size, in the real world, is closer to 0.05, then our power simulation with `tau = 1` is not a good estimate of the power of an experiment run on a real world population.
+
+Suppose previous research suggests we should expect `tau = 0.05` as before. To be able to detect this true effect more easily, therefore, our model needs to be more sensitive. Put another way, we need to increase the precision of our estimates. And to do so, we know we typically want to increase our sample size.
+
+So let's simulate a variety of different power values, varying the sample size:
+
+```{r}
+set.seed(11)
+
+# Reset tau and alpha
+tau = 0.05
+alpha = 0.05
+
+# Define a list for power values and sample sizes to test
+power_vals <- c()
+group_sizes <- c(20,200,1000,2000,5000, 10000)
+
+# Loop over sample sizes
+for (n in group_sizes) {
+  
+  # Define a vector to store n-specific p-values
+  p_vals_n <- c()
+  
+  # Run power simulation on each sample size
+  for (i in 1:1000) {
+    data_i <- data.frame(D = rbinom(2*n, 1, 0.5))
+    data_i$Y <- rnorm(2*n)
+    data_i$Y <- ifelse(data_i$D == 1, data_i$Y + tau, data_i$Y)
+    mod_i <- summary(lm(Y ~ D, data_i))
+    p_vals_n[i] <- mod_i$coefficients["D","Pr(>|t|)"]
+  }
+  
+  # Calculate and store power estimate
+  power_vals <- append(power_vals, mean(p_vals_n < 0.05))
+  
+}
+
+```
+
+And now let's visualise the results:
+
+``` {r}
+library(ggplot2)
+
+power_results <- data.frame(group_size = group_sizes,
+                            power = power_vals)
+
+ggplot(power_results, aes(x = group_size, y = power)) +
+  geom_point() +
+  geom_line() +
+  labs(x = "Group size", y = "Simulated power") +
+  geom_hline(yintercept = 0.8, linetype = "dashed")
+```
+
+From this figure, we can see that in order to reach an acceptable power value for a hypothesized treatment effect of size 0.05, then we need *lots* of subjects in each treatment arm -- about 7000.
+
+## Limitations
+
+Power simulations are useful when the assumptions that we make about the data generating process (including the treatment effect size) approximate the expected relationships in the real world. Obviously, since we wish to design an experiment, we are very unlikely to know that data generating process, so power estimation involves simplifying and justifying the inclusion of features into our simulation. Some things to consider include:
+
+  * The hypothesized treatment effect size (can you use previous studies to inform this?)
+  * The noisiness of the data generating process (the standard deviation of our control arm, in the running example here)
+  * Whether to include covariates that may absorb some of the uncorrelated variance, and how these feed into your regression model
+  
+Of course, there are benefits to running power simulations too:
+  
+  * We don't need to rely on precise formula to estimate the power of designs (particularly bespoke designs)
+  * The general strategy is to repeatedly draw, analyse, and infer from a hypothetical data generating process and model -- this can be made as complicated or as simple as the researcher needs
+  * Modern computer architectures allow us to run thousands of simulations very quickly
+  
